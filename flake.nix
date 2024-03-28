@@ -37,23 +37,24 @@
       # Incorrect scoping
       pkgs = nixpkgs.legacyPackages.x86_64-linux;
 
-      treefmt = (treefmt-nix.lib.evalModule pkgs ./formatter.nix).config.build;
-
-      libPath = lib.makeLibraryPath [
-        pkgs.wayland
-        pkgs.libxkbcommon
-        pkgs.vulkan-loader
-        pkgs.libGL
-      ];
     in {
       devShells.x86_64-linux.default = pkgs.mkShell {
 
         inputsFrom = [ self.packages.x86_64-linux.default ];
 
-        packages = [ pkgs.rustfmt pkgs.rust-analyzer treefmt.wrapper ];
+        packages = [
+          pkgs.rustfmt
+          pkgs.rust-analyzer
+          (treefmt-nix.lib.evalModule pkgs ./formatter.nix).config.build.wrapper
+        ];
         env = {
           inherit GIT_DATE GIT_REV;
-          LD_LIBRARY_PATH = libPath;
+          LD_LIBRARY_PATH = lib.makeLibraryPath [
+            pkgs.wayland
+            pkgs.libxkbcommon
+            pkgs.vulkan-loader
+            pkgs.libGL
+          ];
         };
       };
 
@@ -78,7 +79,14 @@
 
           postFixup = lib.optional pkgs.stdenv.isLinux ''
             rpath=$(patchelf --print-rpath $out/bin/centerpiece)
-            patchelf --set-rpath "$rpath:${libPath}" $out/bin/centerpiece
+            patchelf --set-rpath "$rpath:${
+              lib.makeLibraryPath [
+                pkgs.wayland
+                pkgs.libxkbcommon
+                pkgs.vulkan-loader
+                pkgs.libGL
+              ]
+            }" $out/bin/centerpiece
           '';
 
           cargoBuildFlags = [ "--package centerpiece" ];
@@ -108,7 +116,12 @@
 
           cargoBuildFlags = [ "--package index-git-repositories" ];
 
-          meta.mainProgram = "index-git-repositories";
+          meta = {
+            description = "Your trusty omnibox search.";
+            homepage = "https://github.com/friedow/centerpiece";
+            license = lib.licenses.mit;
+            mainProgram = "index-git-repositories";
+          };
         };
       };
 
@@ -116,7 +129,9 @@
         inherit (self.outputs.packages.x86_64-linux)
           default index-git-repositories;
         shell = self.outputs.devShells.x86_64-linux.default;
-        treefmt = treefmt.check self;
+        treefmt =
+          (treefmt-nix.lib.evalModule pkgs ./formatter.nix).config.build.check
+          self;
         hmModule = (nixpkgs.lib.nixosSystem {
           modules = [
             home-manager.nixosModules.home-manager
@@ -145,6 +160,7 @@
       };
       homeManagerModules.default = import ./home-manager-module.nix self;
 
-      formatter.x86_64-linux = treefmt.wrapper;
+      formatter.x86_64-linux =
+        (treefmt-nix.lib.evalModule pkgs ./formatter.nix).config.build.wrapper;
     };
 }
