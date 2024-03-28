@@ -29,16 +29,13 @@
           ./.;
       };
 
+      inherit ((lib.importTOML ./Cargo.toml).workspace.package) version;
+
       GIT_DATE = "${builtins.substring 0 4 self.lastModifiedDate}-${
           builtins.substring 4 2 self.lastModifiedDate
         }-${builtins.substring 6 2 self.lastModifiedDate}";
       GIT_REV = self.shortRev or "Not committed yet.";
 
-      nativeBuildInputs = [ pkgs.pkgconf ];
-
-      buildInputs = [ pkgs.dbus ];
-
-      inherit ((lib.importTOML ./Cargo.toml).workspace.package) version;
 
       treefmt = (treefmt-nix.lib.evalModule pkgs ./formatter.nix).config.build;
       libPath = lib.makeLibraryPath [
@@ -65,7 +62,9 @@
           pname = "centerpiece";
           inherit src version;
 
-          inherit nativeBuildInputs buildInputs;
+          nativeBuildInputs = [ pkgs.pkg-config ];
+
+          buildInputs = [ pkgs.dbus ];
 
           env = { inherit GIT_REV GIT_DATE; };
 
