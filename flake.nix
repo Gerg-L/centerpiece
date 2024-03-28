@@ -1,11 +1,11 @@
 {
   description = "Your trusty omnibox search.";
 
-  nixConfig = {
-    extra-substituters = [ "https://friedow.cachix.org" ];
-    extra-trusted-public-keys =
-      [ "friedow.cachix.org-1:JDEaYMqNgGu+bVPOca7Zu4Cp8QDMkvQpArKuwPKa29A=" ];
-  };
+  # nixConfig = {
+  #   extra-substituters = [ "https://friedow.cachix.org" ];
+  #   extra-trusted-public-keys =
+  #     [ "friedow.cachix.org-1:JDEaYMqNgGu+bVPOca7Zu4Cp8QDMkvQpArKuwPKa29A=" ];
+  # };
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -17,102 +17,94 @@
     };
   };
 
-  outputs = { self, nixpkgs, crane, treefmt-nix, home-manager, ... }:
+  outputs = { self, nixpkgs, treefmt-nix, home-manager, ... }:
     let
-      system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      inherit (nixpkgs) lib;
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
 
-      devInputs = with pkgs; [ rustc rustfmt cargo ];
-
-      nativeBuildInputs = with pkgs; [
-        makeWrapper
-        # wifi plugin
-        # cargo networkmanager dependency
-        pkgconf
-        dbus
-      ];
-
-      buildInputs = with pkgs; [ dbus ];
-
-      cargoTOML = builtins.fromTOML (builtins.readFile (./. + "/Cargo.toml"));
-
-      inherit (cargoTOML.workspace.package) version;
-      pname = "centerpiece";
-
-      craneLib = crane.lib.${system};
-      fontFilter = path: _type: builtins.match ".*ttf$" path != null;
-      configFilter = path: _type: builtins.match ".*config.yml$" path != null;
-      assetOrCargo = path: type:
-        (configFilter path type) || (fontFilter path type)
-        || (craneLib.filterCargoSources path type);
-      commonArgs = {
-        src = pkgs.lib.cleanSourceWith {
-          src = craneLib.path ./.;
-          filter = assetOrCargo;
-        };
-        inherit pname version buildInputs nativeBuildInputs;
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.fileFilter (x:
+          x.hasExt "ttf" || x.hasExt "rs" || x.hasExt "toml" || x.hasExt "lock")
+          ./.;
       };
-      cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-      cargoClippy = craneLib.cargoClippy (commonArgs // {
-        inherit cargoArtifacts;
-        cargoClippyExtraArgs = "--all-targets --all-features";
-      });
+
       GIT_DATE = "${builtins.substring 0 4 self.lastModifiedDate}-${
           builtins.substring 4 2 self.lastModifiedDate
         }-${builtins.substring 6 2 self.lastModifiedDate}";
       GIT_REV = self.shortRev or "Not committed yet.";
+
+      nativeBuildInputs = [ pkgs.pkgconf ];
+
+      buildInputs = [ pkgs.dbus ];
+
+      inherit ((lib.importTOML ./Cargo.toml).workspace.package) version;
+
       treefmt = (treefmt-nix.lib.evalModule pkgs ./formatter.nix).config.build;
-      libPath = pkgs.lib.makeLibraryPath [
+      libPath = lib.makeLibraryPath [
         pkgs.wayland
         pkgs.libxkbcommon
         pkgs.vulkan-loader
         pkgs.libGL
       ];
-
     in {
-      devShells.${system}.default = pkgs.mkShell {
-        inherit nativeBuildInputs buildInputs GIT_DATE GIT_REV;
-        packages = devInputs ++ [ treefmt.wrapper ];
-        LD_LIBRARY_PATH = libPath;
+      devShells.x86_64-linux.default = pkgs.mkShell {
+
+        inputsFrom = [ self.packages.x86_64-linux.default ];
+
+        packages = [ pkgs.rustfmt pkgs.rust-analyzer treefmt.wrapper ];
+        env = {
+          inherit GIT_DATE GIT_REV;
+          LD_LIBRARY_PATH = libPath;
+        };
       };
-      packages.${system} = {
-        default = craneLib.buildPackage (commonArgs // {
-          inherit cargoArtifacts nativeBuildInputs buildInputs pname GIT_REV
-            GIT_DATE;
-          postFixup = pkgs.lib.optional pkgs.stdenv.isLinux ''
-            rpath=$(patchelf --print-rpath $out/bin/${pname})
-            patchelf --set-rpath "$rpath:${libPath}" $out/bin/${pname}
+
+      packages.x86_64-linux = {
+        default = pkgs.rustPlatform.buildRustPackage {
+
+          pname = "centerpiece";
+          inherit src version;
+
+          inherit nativeBuildInputs buildInputs;
+
+          env = { inherit GIT_REV GIT_DATE; };
+
+          cargoLock.lockFile = ./Cargo.lock;
+
+          strictDeps = true;
+
+          postFixup = lib.optional pkgs.stdenv.isLinux ''
+            rpath=$(patchelf --print-rpath $out/bin/centerpiece)
+            patchelf --set-rpath "$rpath:${libPath}" $out/bin/centerpiece
           '';
 
-          meta = with pkgs.lib; {
+          meta = {
             description = "Your trusty omnibox search.";
             homepage = "https://github.com/friedow/centerpiece";
-            platforms = platforms.linux;
-            license = licenses.mit;
-            mainProgram = pname;
-            maintainers = [ "friedow" ];
+            license = lib.licenses.mit;
+            mainProgram = "centerpiece";
           };
-        });
-        index-git-repositories = craneLib.buildPackage (commonArgs // rec {
-          inherit cargoArtifacts;
+        };
+        index-git-repositories = pkgs.rustPlatform.buildRustPackage {
           pname = "index-git-repositories";
-          cargoExtraArgs = "-p ${pname}";
-          meta.mainProgram = pname;
-        });
+          inherit src version;
+
+          cargoExtraArgs = "-p centerpiece";
+          meta.mainProgram = "centerpiece";
+        };
       };
-      checks.${system} = {
-        inherit (self.outputs.packages.${system})
+      checks.x86_64-linux = {
+        inherit (self.outputs.packages.x86_64-linux)
           default index-git-repositories;
-        shell = self.outputs.devShells.${system}.default;
+        shell = self.outputs.devShells.x86_64-linux.default;
         treefmt = treefmt.check self;
-        inherit cargoClippy;
         hmModule = (nixpkgs.lib.nixosSystem {
-          system = "x86_64-linux";
           modules = [
             home-manager.nixosModules.home-manager
             {
+              nixpkgs.hostPlatform = "x86_64-linux";
               home-manager.users.alice = {
-                imports = [ self.outputs.hmModules."x86_64-linux".default ];
+                imports = [ self.outputs.hmModules.x86_64-linux.default ];
                 programs.centerpiece = {
                   enable = true;
                   config.plugin.git_repositories.commands = [ [ "alacritty" ] ];
@@ -132,10 +124,8 @@
           ];
         }).config.system.build.vm;
       };
-      hmModules.${system}.default = import ./home-manager-module.nix {
-        centerpiece = self.outputs.packages.${system}.default;
-        inherit (self.outputs.packages.${system}) index-git-repositories;
-      };
-      formatter.${system} = treefmt.wrapper;
+      homeManagerModules.default = import ./home-manager-module.nix self;
+
+      formatter.x86_64-linux = treefmt.wrapper;
     };
 }
