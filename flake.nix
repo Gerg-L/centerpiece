@@ -3,40 +3,35 @@
 
   nixConfig = {
     extra-substituters = [ "https://friedow.cachix.org" ];
-    extra-trusted-public-keys = [ "friedow.cachix.org-1:JDEaYMqNgGu+bVPOca7Zu4Cp8QDMkvQpArKuwPKa29A=" ];
+    extra-trusted-public-keys =
+      [ "friedow.cachix.org-1:JDEaYMqNgGu+bVPOca7Zu4Cp8QDMkvQpArKuwPKa29A=" ];
   };
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     home-manager.url = "github:nix-community/home-manager";
-    treefmt-nix.url = "github:numtide/treefmt-nix/";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      treefmt-nix,
-      home-manager,
-      ...
-    }:
+  outputs = { self, nixpkgs, treefmt-nix, home-manager, ... }:
     let
       inherit (nixpkgs) lib;
 
       inherit ((lib.importTOML ./Cargo.toml).workspace.package) version;
-          src = lib.fileset.toSource {
-            root = ./.;
-            fileset = lib.fileset.unions [
-              ./client
-              ./services/index-git-repositories
-              ./Cargo.lock
-              ./Cargo.toml
-            ];
-          };
+
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          ./client
+          ./services/index-git-repositories
+          ./Cargo.lock
+          ./Cargo.toml
+        ];
+      };
 
       GIT_DATE = "${builtins.substring 0 4 self.lastModifiedDate}-${
-        builtins.substring 4 2 self.lastModifiedDate
-      }-${builtins.substring 6 2 self.lastModifiedDate}";
+          builtins.substring 4 2 self.lastModifiedDate
+        }-${builtins.substring 6 2 self.lastModifiedDate}";
       GIT_REV = self.shortRev or "Not committed yet.";
 
       # Incorrect scoping
@@ -50,17 +45,12 @@
         pkgs.vulkan-loader
         pkgs.libGL
       ];
-    in
-    {
+    in {
       devShells.x86_64-linux.default = pkgs.mkShell {
 
         inputsFrom = [ self.packages.x86_64-linux.default ];
 
-        packages = [
-          pkgs.rustfmt
-          pkgs.rust-analyzer
-          treefmt.wrapper
-        ];
+        packages = [ pkgs.rustfmt pkgs.rust-analyzer treefmt.wrapper ];
         env = {
           inherit GIT_DATE GIT_REV;
           LD_LIBRARY_PATH = libPath;
@@ -80,9 +70,7 @@
 
           buildInputs = [ pkgs.dbus ];
 
-          env = {
-            inherit GIT_REV GIT_DATE;
-          };
+          env = { inherit GIT_REV GIT_DATE; };
 
           cargoLock.lockFile = ./Cargo.lock;
 
@@ -112,9 +100,7 @@
 
           buildInputs = [ pkgs.dbus ];
 
-          env = {
-            inherit GIT_REV GIT_DATE;
-          };
+          env = { inherit GIT_REV GIT_DATE; };
 
           cargoLock.lockFile = ./Cargo.lock;
 
@@ -127,35 +113,35 @@
       };
 
       checks.x86_64-linux = {
-        inherit (self.outputs.packages.x86_64-linux) default index-git-repositories;
+        inherit (self.outputs.packages.x86_64-linux)
+          default index-git-repositories;
         shell = self.outputs.devShells.x86_64-linux.default;
         treefmt = treefmt.check self;
-        hmModule =
-          (nixpkgs.lib.nixosSystem {
-            modules = [
-              home-manager.nixosModules.home-manager
-              {
-                nixpkgs.hostPlatform = "x86_64-linux";
-                home-manager.users.alice = {
-                  imports = [ self.outputs.hmModules.x86_64-linux.default ];
-                  programs.centerpiece = {
+        hmModule = (nixpkgs.lib.nixosSystem {
+          modules = [
+            home-manager.nixosModules.home-manager
+            {
+              nixpkgs.hostPlatform = "x86_64-linux";
+              home-manager.users.alice = {
+                imports = [ self.outputs.hmModules.x86_64-linux.default ];
+                programs.centerpiece = {
+                  enable = true;
+                  config.plugin.git_repositories.commands = [ [ "alacritty" ] ];
+                  services.index-git-repositories = {
                     enable = true;
-                    config.plugin.git_repositories.commands = [ [ "alacritty" ] ];
-                    services.index-git-repositories = {
-                      enable = true;
-                      interval = "3hours";
-                    };
+                    interval = "3hours";
                   };
-                  home.stateVersion = "23.11";
                 };
-                users.users.alice = {
-                  isNormalUser = true;
-                  uid = 1000;
-                  home = "/home/alice";
-                };
-              }
-            ];
-          }).config.system.build.vm;
+                home.stateVersion = "23.11";
+              };
+              users.users.alice = {
+                isNormalUser = true;
+                uid = 1000;
+                home = "/home/alice";
+              };
+            }
+          ];
+        }).config.system.build.vm;
       };
       homeManagerModules.default = import ./home-manager-module.nix self;
 
